@@ -1,7 +1,11 @@
-import { AgentResult, LLMResponse, Message } from "./types";
+import { AgentResult, LLMResponse, Message, OnEvent } from "./types";
 import { search, scrape } from "./tools";
 
-export const runAgent = async (query: string): Promise<AgentResult> => {
+export const runAgent = async (
+  query: string,
+  onEvent?: OnEvent,
+): Promise<AgentResult> => {
+  const emit = onEvent ?? (() => {});
   const messages: Message[] = [];
   const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
   const MAX_ITERATIONS = process.env.MAX_ITERATIONS
@@ -33,7 +37,13 @@ export const runAgent = async (query: string): Promise<AgentResult> => {
   console.log("Agent Loop starting with query: ", query);
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     console.log(`Iteration ${i + 1} of ${MAX_ITERATIONS}`);
+    emit({
+      type: "iteration",
+      data: { iteration: i + 1, maxIterations: MAX_ITERATIONS },
+    });
+
     // 2. call the LLM with messages + system prompt
+    emit({ type: "thinking", data: { message: "Thinking..." } });
     const response = await fetch(
       "https://openrouter.ai/api/v1/chat/completions",
       {
@@ -70,14 +80,30 @@ export const runAgent = async (query: string): Promise<AgentResult> => {
         const tool = toolCalls[j];
         if (tool.tool_name === "search") {
           console.log(`Calling search tool with input: ${tool.input}`);
+          emit({
+            type: "tool_call",
+            data: { tool: "search", input: tool.input },
+          });
           const toolCallRes = await search(tool.input);
+          emit({
+            type: "tool_result",
+            data: { tool: "search", input: tool.input },
+          });
           messages.push({
             role: "user",
             content: `Tool result for "${tool.tool_name}": ${JSON.stringify(toolCallRes)}`,
           });
         } else if (tool.tool_name === "scrape") {
           console.log(`Calling scrape tool with input: ${tool.input}`);
+          emit({
+            type: "tool_call",
+            data: { tool: "scrape", input: tool.input },
+          });
           const toolCallRes = await scrape(tool.input);
+          emit({
+            type: "tool_result",
+            data: { tool: "scrape", input: tool.input },
+          });
           messages.push({
             role: "user",
             content: `Tool result for "${tool.tool_name}": ${JSON.stringify(toolCallRes)}`,
@@ -87,14 +113,18 @@ export const runAgent = async (query: string): Promise<AgentResult> => {
     }
     // 5. if it has final_response → return AgentResult
     if (data?.final_response) {
-      return { query, report: data.final_response, isSuccessful: true };
+      const result = { query, report: data.final_response, isSuccessful: true };
+      emit({ type: "done", data: result });
+      return result;
     }
   }
 
   // 6. fallback if max iterations hit without a final_response
-  return {
+  const result = {
     query,
     report: "Max iterations reached without a final response.",
     isSuccessful: false,
   };
+  emit({ type: "error", data: result });
+  return result;
 };

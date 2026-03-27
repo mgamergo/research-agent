@@ -23,3 +23,18 @@ export interface LLMResponse {
   tool_call?: ToolCall[];
   final_response: string;
 }
+
+export type StreamEventType =
+  | "thinking"
+  | "tool_call"
+  | "tool_result"
+  | "iteration"
+  | "done"
+  | "error";
+
+export interface StreamEvent {
+  type: StreamEventType;
+  data: Record<string, unknown>;
+}
+
+export type OnEvent = (event: StreamEvent) => void;
